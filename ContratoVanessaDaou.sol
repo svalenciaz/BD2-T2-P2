@@ -11,6 +11,8 @@ contract VanessaDaou {
     
     uint private totalDebts;
     
+    uint private totalPurchases;
+    
     // Constructor
     
     constructor(){
@@ -265,12 +267,43 @@ contract VanessaDaou {
         
         client.totalExpend += buyPrice;
         product.units -= 1;
-        
+            
         clients[clientCode] = client;
         products[productName] = product;
         expendByCountries[client.country] += buyPrice;
+        totalPurchases += buyPrice;
         
         emit BuyProduct (owner, msg.sender, product.name, client.code, product.price, buyPrice);
+    }
+    
+    
+   /* creditProduct does not allow a payment different than the exact price   
+    */
+    
+    function creditProduct (string memory productName)
+    public
+    payable
+    isClient
+    productExists(productName)
+    productAvailable(productName)
+    hasNotDebt
+    {
+        uint clientCode = clientCodeByAddress[msg.sender];
+        Client memory client = clients[clientCode];
+        Product memory product = products[productName];
+        
+        uint buyPrice = finalPrice(productName);
+        
+        if (msg.value == 0){
+            client.debt += buyPrice;
+            product.units -= 1;
+                
+            clients[clientCode] = client;
+            products[productName] = product;
+            expendByCountries[client.country] += buyPrice;
+            totalDebts += buyPrice;
+            totalPurchases += buyPrice;
+        }  
     }
     
     /*
@@ -284,6 +317,86 @@ contract VanessaDaou {
     returns (uint countryTotal)
     {
         countryTotal = expendByCountries[countryName];
+    }
+    
+    /*
+    debtInformation returns to the client the value of debt it has with the store
+    */
+    
+    function debtInformation ()
+    public
+    view
+    isClient
+    returns (uint debt)
+    {
+        uint code = clientCodeByAddress[msg.sender];
+        debt = clients[code].debt;
+    }
+    
+    /*
+    payDebt allows the client to pay its current debt
+    */
+    
+    function payDebt ()
+    public
+    payable
+    isClient
+    exactPrice(debtInformation())
+    returns (string memory message)
+    {
+        uint clientCode = clientCodeByAddress[msg.sender];
+        Client memory client = clients[clientCode];
+        
+        uint buyPrice = msg.value/(10**18);
+        
+        client.totalExpend += buyPrice;
+        client.debt = 0;
+            
+        clients[clientCode] = client;
+        expendByCountries[client.country] += buyPrice;
+        totalDebts -= buyPrice;
+        
+        message = "Your debt has been paid";
+    }
+    
+    /*
+    purchasesInformation allows the client see how much they have spend in all their purchases
+    */
+    
+    function purchasesInformation ()
+    public
+    view
+    isClient
+    returns (uint expend)
+    {
+        uint code = clientCodeByAddress[msg.sender];
+        expend = clients[code].totalExpend;
+    }
+    
+    /*
+    totalPurchasesInformation allows the owner see how much they have sell 
+    */
+    
+    function totalPurchasesInformation ()
+    public
+    view
+    isOwner
+    returns (uint purchases)
+    {
+        purchases = totalPurchases;
+    }
+    
+     /*
+    totalPurchasesInformation allows the owner see how much they have sell 
+    */
+    
+    function totalDebtsInformation ()
+    public
+    view
+    isOwner
+    returns (uint debts)
+    {
+        debts = totalDebts;
     }
     
     /*
