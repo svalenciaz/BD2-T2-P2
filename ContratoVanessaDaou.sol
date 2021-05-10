@@ -11,8 +11,6 @@ contract VanessaDaou {
     
     uint private totalDebts;
     
-    uint private totalPurchases;
-    
     // Constructor
     
     constructor(){
@@ -62,11 +60,13 @@ contract VanessaDaou {
     
     mapping (string => bool) private productNames;
     
-    mapping (uint => bool) private usedClientCodes;
+    mapping (uint => bool) private clientCodes;
     
-    // This one saves the total Ether expend by the client of each country, key string is the country name
+    // These two saves the total Ether expend and debts by the clients of each country, key string is the country name
     
     mapping (string => uint) private expendByCountries;
+    
+    mapping (string => uint) private debtsByCountries;
     
     
     // Modifiers
@@ -87,13 +87,19 @@ contract VanessaDaou {
     }
     
     modifier clientCodeNotExists (uint code) {
-        require (!usedClientCodes[code], "Code is already in use");
+        require (!clientCodes[code], "Code is already in use");
         _;
     }
     
     modifier hasNotDebt (){
         uint code = clientCodeByAddress[msg.sender];
         require (clients[code].debt == 0, "Client with debt can not buy");
+        _;
+    }
+    
+    modifier hasDebt (){
+        uint code = clientCodeByAddress[msg.sender];
+        require (clients[code].debt != 0, "Current client has not debt");
         _;
     }
     
@@ -134,6 +140,10 @@ contract VanessaDaou {
     
     event BuyProduct (address seller, address buyer, string produtcName, uint clientCode, uint basePrice, uint price);
     
+    event BuyWithCreditProduct (address seller, address buyer, string produtcName, uint clientCode, uint basePrice, uint price);
+    
+    event PayCredit (address seller, address buyer, uint debtPayed);
+    
     // Functions
     
     /*
@@ -169,7 +179,7 @@ contract VanessaDaou {
     if its code is positive and if the client code doesn't exists yet
     
     Initialize the client's totalExpend and debt in 0, and updates the clientCodeByAddress and
-    usedClientCodes maps with a address to code (uint) and code (uint) to true respectively
+    clientCodes maps with a address to code (uint) and code (uint) to true respectively
     */
     
     function newClient (uint _code, string memory _name, string memory _country)
@@ -189,7 +199,7 @@ contract VanessaDaou {
         
         clientCodeByAddress[msg.sender] = _code;
         clients[_code] = client;
-        usedClientCodes[_code] = true;
+        clientCodes[_code] = true;
         
         emit CreateNewClient(msg.sender, _code, _name, _country);
         
@@ -211,7 +221,7 @@ contract VanessaDaou {
         uint clientExpend = clients[clientCode].totalExpend;
         uint productPrice = products[productName].price;
         
-        if ((productPrice>=3) && (clientExpend>=50)){
+        if ((productPrice>=3) && (clientExpend>50)){
             return (productPrice - 3);
         }
         else{
@@ -271,7 +281,6 @@ contract VanessaDaou {
         clients[clientCode] = client;
         products[productName] = product;
         expendByCountries[client.country] += buyPrice;
-        totalPurchases += buyPrice;
         
         emit BuyProduct (owner, msg.sender, product.name, client.code, product.price, buyPrice);
     }
@@ -282,7 +291,6 @@ contract VanessaDaou {
     
     function creditProduct (string memory productName)
     public
-    payable
     isClient
     productExists(productName)
     productAvailable(productName)
@@ -294,16 +302,16 @@ contract VanessaDaou {
         
         uint buyPrice = finalPrice(productName);
         
-        if (msg.value == 0){
-            client.debt += buyPrice;
-            product.units -= 1;
-                
-            clients[clientCode] = client;
-            products[productName] = product;
-            expendByCountries[client.country] += buyPrice;
-            totalDebts += buyPrice;
-            totalPurchases += buyPrice;
-        }  
+        client.debt += buyPrice;
+        product.units -= 1;
+            
+        clients[clientCode] = client;
+        products[productName] = product;
+        totalDebts += buyPrice;
+        debtsByCountries[client.country] += buyPrice;
+        
+        emit BuyWithCreditProduct (owner, msg.sender, productName, clientCode, product.price , buyPrice);
+        
     }
     
     /*
@@ -317,6 +325,32 @@ contract VanessaDaou {
     returns (uint countryTotal)
     {
         countryTotal = expendByCountries[countryName];
+    }
+    
+    /*
+    debtsInCountry returns to the owner the amount sells of a country by the given name
+    */
+    
+    function debtsInCountry (string memory countryName)
+    public
+    view
+    isOwner
+    returns (uint countryTotal)
+    {
+        countryTotal = debtsByCountries[countryName];
+    }
+    
+    /*
+    sellsAndDebtsInCountry returns to the owner the amount sells and debts of a country by the given name
+    */
+    
+    function sellsAndDebtsInCountry (string memory countryName)
+    public
+    view
+    isOwner
+    returns (uint countryTotal)
+    {
+        countryTotal = expendByCountries[countryName] + debtsByCountries[countryName];
     }
     
     /*
@@ -341,20 +375,24 @@ contract VanessaDaou {
     public
     payable
     isClient
+    hasDebt
     exactPrice(debtInformation())
     returns (string memory message)
     {
         uint clientCode = clientCodeByAddress[msg.sender];
         Client memory client = clients[clientCode];
         
-        uint buyPrice = msg.value/(10**18);
+        uint buyPrice = debtInformation();
         
         client.totalExpend += buyPrice;
         client.debt = 0;
             
         clients[clientCode] = client;
         expendByCountries[client.country] += buyPrice;
+        debtsByCountries[client.country] -= buyPrice;
         totalDebts -= buyPrice;
+        
+        emit PayCredit (owner, msg.sender, buyPrice);
         
         message = "Your debt has been paid";
     }
@@ -381,9 +419,22 @@ contract VanessaDaou {
     public
     view
     isOwner
-    returns (uint purchases)
+    returns (uint finalBalance)
     {
-        purchases = totalPurchases;
+        finalBalance = address(this).balance/(10**18);
+    }
+    
+    /*
+    totalPurchasesWithDebtsInformation allows the owner see how much they have sell including debts
+    */
+    
+    function totalPurchasesWithDebtsInformation ()
+    public
+    view
+    isOwner
+    returns (uint finalBalance)
+    {
+        finalBalance = address(this).balance/(10**18) + totalDebts;
     }
     
      /*
